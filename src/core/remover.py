@@ -8,28 +8,20 @@ import io
 import numpy as np
 import cv2
 
-# Tentukan model yang akan digunakan. 'isnet-general-use' seringkali lebih presisi.
+# Tentukan model yang akan digunakan.
 MODEL_NAME = "isnet-general-use"
 
-# --- Pengaturan Lanjutan untuk Hasil Potongan Paling Bersih ---
-
-# 1. Alpha Matting dengan parameter 'agresif' untuk memisahkan objek dengan tegas.
-ALPHA_MATTING_ENABLED = True
-ALPHA_MATTING_FOREGROUND_THRESHOLD = 250  # Kembali ke nilai tinggi
-ALPHA_MATTING_BACKGROUND_THRESHOLD = 20
-ALPHA_MATTING_ERODE_SIZE = 5  # Kembali ke nilai kecil
-
-# 2. Aktifkan langkah pemolesan akhir pada mask dari rembg.
+# --- Pengaturan Lanjutan untuk Hasil Presisi Tinggi ---
+ALPHA_MATTING_FOREGROUND_THRESHOLD = 250
+ALPHA_MATTING_BACKGROUND_THRESHOLD = 15
+ALPHA_MATTING_ERODE_SIZE = 5
 POST_PROCESS_MASK_ENABLED = True
 
-# 3. Threshold untuk 'Hard Cut' mask kita.
-HARDEN_MASK_THRESHOLD = 128
 
-
-def harden_mask(image_bytes: bytes, threshold: int) -> bytes:
+def refine_mask(image_bytes: bytes) -> bytes:
     """
-    Membuat tepian mask menjadi keras (tanpa gradasi) dengan thresholding.
-    Ini menghilangkan semua piksel semi-transparan untuk hasil potongan yang sangat bersih.
+    Menyempurnakan alpha channel untuk tepian yang lebih jelas tanpa kehilangan detail,
+    dengan meningkatkan kontras pada masker.
     """
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
@@ -37,10 +29,17 @@ def harden_mask(image_bytes: bytes, threshold: int) -> bytes:
 
         alpha = img_np[:, :, 3]
 
-        # Terapkan thresholding: nilai di atas threshold jadi 255, di bawahnya jadi 0
-        _, new_alpha = cv2.threshold(alpha, threshold, 255, cv2.THRESH_BINARY)
+        # Tingkatkan kontras pada alpha channel.
+        # Ini akan membuat area semi-transparan menjadi lebih solid atau lebih transparan,
+        # menghasilkan tepian yang lebih tegas namun tetap menjaga detail.
+        alpha_float = alpha.astype(float) / 255.0
 
-        # Ganti alpha channel lama dengan yang sudah di-threshold
+        # Fungsi power < 1 akan mendorong nilai tengah ke arah 1 (lebih solid)
+        refined_alpha_float = np.power(alpha_float, 0.75)
+
+        new_alpha = (refined_alpha_float * 255).astype(np.uint8)
+
+        # Ganti alpha channel lama dengan yang sudah disempurnakan
         img_np[:, :, 3] = new_alpha
 
         new_img = Image.fromarray(img_np, "RGBA")
@@ -50,51 +49,34 @@ def harden_mask(image_bytes: bytes, threshold: int) -> bytes:
         return buffer.getvalue()
 
     except Exception as e:
-        print(f"Gagal mengeraskan mask: {e}. Mengembalikan gambar asli.")
+        print(f"Gagal menyempurnakan mask: {e}. Mengembalikan gambar asli.")
         return image_bytes
 
 
 def suppress_color_spill(image_bytes: bytes) -> bytes:
     """
     Pembersih noda digital: Mengurangi 'color spill' dari latar belakang ke objek.
-    Ini adalah langkah post-processing canggih untuk membersihkan tepian.
     """
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
         img_np = np.array(img)
-
-        # Ekstrak channel RGB dan Alpha
         rgb = img_np[:, :, :3]
         alpha = img_np[:, :, 3]
-
-        # Buat mask untuk piksel yang memiliki transparansi (area tepian)
         spill_mask = (alpha > 0) & (alpha < 255)
-
-        # Buat mask untuk piksel yang sepenuhnya solid (inti objek)
         solid_mask = alpha == 255
-
-        # Dapatkan warna rata-rata dari inti objek. Ini akan menjadi warna 'pembersih'.
-        # Kita menggunakan median untuk menghindari pengaruh warna outlier.
+        if not np.any(solid_mask):  # Hindari error jika tidak ada area solid
+            return image_bytes
         median_color = np.median(rgb[solid_mask], axis=0)
-
-        # Untuk setiap piksel di area tepian, campurkan warnanya dengan warna inti objek
-        # Semakin transparan pikselnya, semakin banyak warna inti yang dicampurkan.
-        for i in range(3):  # Loop untuk R, G, B
+        for i in range(3):
             channel = rgb[:, :, i]
-            # Terapkan warna pembersih ke area tepian
             channel[spill_mask] = np.clip(
                 channel[spill_mask] * 0.3 + median_color[i] * 0.7, 0, 255
             )
-
-        # Gabungkan kembali channel RGB yang sudah dibersihkan dengan Alpha asli
         new_img_np = np.dstack((rgb.astype(np.uint8), alpha))
         new_img = Image.fromarray(new_img_np, "RGBA")
-
-        # Simpan hasilnya ke bytes
         buffer = io.BytesIO()
         new_img.save(buffer, format="PNG")
         return buffer.getvalue()
-
     except Exception as e:
         print(
             f"Gagal melakukan color spill suppression: {e}. Mengembalikan gambar asli."
@@ -142,39 +124,33 @@ def apply_solid_background(image_bytes: bytes, color: str) -> bytes:
 
 
 # Buat sesi rembg dengan model yang spesifik.
-# Ini lebih efisien karena model hanya dimuat sekali saat aplikasi dimulai.
 session = new_session(model_name=MODEL_NAME)
 
 
 def remove_background(input_image_bytes: bytes) -> bytes:
     """
-    Menerima byte gambar, menghapus latar belakangnya, dan mengembalikan byte gambar hasil.
-
-    :param input_image_bytes: Gambar masukan dalam bentuk bytes.
-    :return: Gambar hasil (PNG) dalam bentuk bytes dengan background transparan.
+    Menerima byte gambar, menghapus latarnya, dan mengembalikan hasil yang presisi.
     """
     try:
         # Langkah 1: Hapus background dengan rembg
         initial_output_bytes = remove(
             input_image_bytes,
             session=session,
-            alpha_matting=ALPHA_MATTING_ENABLED,
+            alpha_matting=True,
             alpha_matting_foreground_threshold=ALPHA_MATTING_FOREGROUND_THRESHOLD,
             alpha_matting_background_threshold=ALPHA_MATTING_BACKGROUND_THRESHOLD,
             alpha_matting_erode_size=ALPHA_MATTING_ERODE_SIZE,
             post_process_mask=POST_PROCESS_MASK_ENABLED,
         )
 
-        # Langkah 2: Lakukan 'Hard Cut' pada mask untuk potongan yang super bersih
-        hardened_bytes = harden_mask(initial_output_bytes, HARDEN_MASK_THRESHOLD)
+        # Langkah 2: Sempurnakan mask untuk tepian yang lebih tegas namun menjaga detail
+        refined_bytes = refine_mask(initial_output_bytes)
 
         # Langkah 3: Lakukan pembersihan 'color spill'
-        final_output_bytes = suppress_color_spill(hardened_bytes)
+        final_output_bytes = suppress_color_spill(refined_bytes)
 
         return final_output_bytes
 
     except Exception as e:
-        # Jika terjadi error saat pemrosesan, kita bisa menanganinya di sini.
-        # Untuk saat ini, kita hanya akan print error dan raise kembali.
         print(f"Error saat memproses gambar: {e}")
         raise
