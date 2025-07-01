@@ -6,24 +6,52 @@ from rembg import remove, new_session
 from PIL import Image, ImageColor
 import io
 import numpy as np
+import cv2
 
 # Tentukan model yang akan digunakan. 'isnet-general-use' seringkali lebih presisi.
 MODEL_NAME = "isnet-general-use"
 
-# --- Pengaturan Lanjutan untuk Hasil Maksimal ---
+# --- Pengaturan Lanjutan untuk Hasil Potongan Paling Bersih ---
 
-# 1. Aktifkan Alpha Matting untuk detail yang lebih halus.
+# 1. Alpha Matting dengan parameter 'agresif' untuk memisahkan objek dengan tegas.
 ALPHA_MATTING_ENABLED = True
-#    Parameter yang lebih 'ketat' untuk mendefinisikan area foreground dan background,
-#    memaksa algoritma untuk lebih presisi.
-ALPHA_MATTING_FOREGROUND_THRESHOLD = 250
+ALPHA_MATTING_FOREGROUND_THRESHOLD = 250  # Kembali ke nilai tinggi
 ALPHA_MATTING_BACKGROUND_THRESHOLD = 20
-#    Ukuran erosi yang lebih kecil untuk menangani detail yang sangat halus.
-ALPHA_MATTING_ERODE_SIZE = 5
+ALPHA_MATTING_ERODE_SIZE = 5  # Kembali ke nilai kecil
 
-# 2. Aktifkan langkah pemolesan akhir pada mask.
-#    Ini adalah kunci untuk menghaluskan tepian dan mengurangi 'color spill'.
+# 2. Aktifkan langkah pemolesan akhir pada mask dari rembg.
 POST_PROCESS_MASK_ENABLED = True
+
+# 3. Threshold untuk 'Hard Cut' mask kita.
+HARDEN_MASK_THRESHOLD = 128
+
+
+def harden_mask(image_bytes: bytes, threshold: int) -> bytes:
+    """
+    Membuat tepian mask menjadi keras (tanpa gradasi) dengan thresholding.
+    Ini menghilangkan semua piksel semi-transparan untuk hasil potongan yang sangat bersih.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        img_np = np.array(img)
+
+        alpha = img_np[:, :, 3]
+
+        # Terapkan thresholding: nilai di atas threshold jadi 255, di bawahnya jadi 0
+        _, new_alpha = cv2.threshold(alpha, threshold, 255, cv2.THRESH_BINARY)
+
+        # Ganti alpha channel lama dengan yang sudah di-threshold
+        img_np[:, :, 3] = new_alpha
+
+        new_img = Image.fromarray(img_np, "RGBA")
+
+        buffer = io.BytesIO()
+        new_img.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    except Exception as e:
+        print(f"Gagal mengeraskan mask: {e}. Mengembalikan gambar asli.")
+        return image_bytes
 
 
 def suppress_color_spill(image_bytes: bytes) -> bytes:
@@ -126,7 +154,7 @@ def remove_background(input_image_bytes: bytes) -> bytes:
     :return: Gambar hasil (PNG) dalam bentuk bytes dengan background transparan.
     """
     try:
-        # Langkah 1: Hapus background dengan rembg dan semua pengaturan lanjutan
+        # Langkah 1: Hapus background dengan rembg
         initial_output_bytes = remove(
             input_image_bytes,
             session=session,
@@ -137,8 +165,11 @@ def remove_background(input_image_bytes: bytes) -> bytes:
             post_process_mask=POST_PROCESS_MASK_ENABLED,
         )
 
-        # Langkah 2: Lakukan pembersihan 'color spill' pada hasil rembg
-        final_output_bytes = suppress_color_spill(initial_output_bytes)
+        # Langkah 2: Lakukan 'Hard Cut' pada mask untuk potongan yang super bersih
+        hardened_bytes = harden_mask(initial_output_bytes, HARDEN_MASK_THRESHOLD)
+
+        # Langkah 3: Lakukan pembersihan 'color spill'
+        final_output_bytes = suppress_color_spill(hardened_bytes)
 
         return final_output_bytes
 
