@@ -7,7 +7,13 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 # Import konfigurasi dan handler
 import config
-from src.bot.handlers import start_handler, help_handler, image_handler, error_handler
+from src.bot.handlers import (
+    start_handler,
+    help_handler,
+    image_handler,
+    error_handler,
+    bg_handler,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -31,6 +37,9 @@ def main():
 
     # Perintah /help
     application.add_handler(CommandHandler("help", help_handler))
+
+    # Perintah /bg
+    application.add_handler(CommandHandler("bg", bg_handler))
 
     # Pesan berupa gambar
     application.add_handler(MessageHandler(filters.PHOTO, image_handler))

@@ -3,7 +3,7 @@ File ini berisi logika inti untuk menghapus background gambar.
 """
 
 from rembg import remove, new_session
-from PIL import Image
+from PIL import Image, ImageColor
 import io
 import numpy as np
 
@@ -72,6 +72,45 @@ def suppress_color_spill(image_bytes: bytes) -> bytes:
             f"Gagal melakukan color spill suppression: {e}. Mengembalikan gambar asli."
         )
         return image_bytes
+
+
+def apply_solid_background(image_bytes: bytes, color: str) -> bytes:
+    """
+    Mengganti background transparan dengan warna solid.
+
+    :param image_bytes: Gambar PNG transparan dalam bentuk bytes.
+    :param color: Nama warna (misal: 'red', 'blue') atau kode hex (misal: '#FF5733').
+    :return: Gambar JPG dengan background baru dalam bentuk bytes.
+    """
+    try:
+        # Buka gambar transparan
+        foreground_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+
+        # Dapatkan warna dari input string
+        # ImageColor akan menangani nama warna dan kode hex secara otomatis
+        background_color = ImageColor.getrgb(color)
+
+        # Buat gambar background baru dengan warna solid
+        background_img = Image.new("RGBA", foreground_img.size, background_color)
+
+        # Gabungkan background dengan gambar foreground
+        # Alpha channel dari foreground_img digunakan sebagai mask
+        composite_img = Image.alpha_composite(background_img, foreground_img)
+
+        # Konversi ke RGB (format JPG tidak mendukung transparansi)
+        final_img = composite_img.convert("RGB")
+
+        # Simpan hasilnya ke bytes dengan format JPEG
+        buffer = io.BytesIO()
+        final_img.save(buffer, format="JPEG", quality=95)
+        return buffer.getvalue()
+
+    except ValueError:
+        # Error ini terjadi jika string warna tidak valid
+        raise ValueError(f"Warna '{color}' tidak dikenali.")
+    except Exception as e:
+        print(f"Gagal menerapkan background solid: {e}")
+        raise
 
 
 # Buat sesi rembg dengan model yang spesifik.
