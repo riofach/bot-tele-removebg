@@ -67,7 +67,7 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"👋 Halo, {user_name}!\n\n"
-        "Saya adalah bot yang bisa menghapus dan mengganti background gambar. "
+        'Saya adalah bot milik <a href="https://www.instagram.com/rrdtyaa_/">@rrdtyaa_</a> yang bisa menghapus dan mengganti background gambar. '
         "Silakan pilih salah satu menu di bawah ini.",
         reply_markup=reply_markup,
         parse_mode="HTML",
@@ -90,8 +90,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_html(
         f"👋 Halo, {user_name}!\n\n"
-        "Saya adalah bot yang bisa menghapus dan mengganti background gambar. "
-        "Pilih salah satu menu di bawah ini atau kirimkan saya foto secara langsung.",
+        'Saya adalah bot milik <a href="https://www.instagram.com/rrdtyaa_/">@rrdtyaa_</a> yang bisa menghapus dan mengganti background gambar. '
+        "Silakan pilih salah satu menu di bawah ini.",
         reply_markup=reply_markup,
     )
 
