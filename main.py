@@ -27,17 +27,18 @@ from src.bot.handlers import (
     # --- Impor untuk Fitur Pas Foto ---
     pas_foto_start,
     pas_foto_get_photo,
+    handle_remove_bg_decision_yes,
+    handle_remove_bg_decision_no,
     pas_foto_bg_option,
     pas_foto_get_bg_color,
     pas_foto_get_size,
-    pas_foto_get_output_format,
     pas_foto_get_pdf_count,
     pas_foto_cancel,
     GET_PHOTO,
+    CONFIRM_BG_REMOVAL,
     CHOOSE_BG_OPTION,
     GET_BG_COLOR,
     GET_SIZE,
-    GET_OUTPUT_FORMAT,
     GET_PDF_COUNT,
 )
 
@@ -62,6 +63,14 @@ def main():
         entry_points=[CallbackQueryHandler(pas_foto_start, pattern="^pas_foto_start$")],
         states={
             GET_PHOTO: [MessageHandler(filters.PHOTO, pas_foto_get_photo)],
+            CONFIRM_BG_REMOVAL: [
+                CallbackQueryHandler(
+                    handle_remove_bg_decision_yes, pattern="^remove_bg_yes$"
+                ),
+                CallbackQueryHandler(
+                    handle_remove_bg_decision_no, pattern="^remove_bg_no$"
+                ),
+            ],
             CHOOSE_BG_OPTION: [
                 CallbackQueryHandler(pas_foto_bg_option, pattern="^change_bg|skip_bg$")
             ],
@@ -69,16 +78,14 @@ def main():
                 CallbackQueryHandler(pas_foto_get_bg_color, pattern="^color_")
             ],
             GET_SIZE: [CallbackQueryHandler(pas_foto_get_size, pattern="^size_")],
-            GET_OUTPUT_FORMAT: [
-                CallbackQueryHandler(
-                    pas_foto_get_output_format, pattern="^output_single|output_pdf$"
-                )
-            ],
             GET_PDF_COUNT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, pas_foto_get_pdf_count)
             ],
         },
-        fallbacks=[CommandHandler("batal", pas_foto_cancel)],
+        fallbacks=[
+            CommandHandler("batal", pas_foto_cancel),
+            CallbackQueryHandler(back_to_start, pattern="^back_to_start$"),
+        ],
     )
 
     # --- Handler untuk Fitur Hapus Background Sederhana ---
@@ -89,7 +96,10 @@ def main():
         states={
             GET_SIMPLE_PHOTO: [MessageHandler(filters.PHOTO, simple_image_handler)],
         },
-        fallbacks=[CommandHandler("batal", pas_foto_cancel)],
+        fallbacks=[
+            CommandHandler("batal", pas_foto_cancel),
+            CallbackQueryHandler(back_to_start, pattern="^back_to_start$"),
+        ],
     )
 
     application.add_handler(pas_foto_conv)

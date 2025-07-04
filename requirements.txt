@@ -3,4 +3,5 @@ rembg
 Pillow
 python-dotenv
 onnxruntime
-reportlab 
+reportlab
+opencv-python 

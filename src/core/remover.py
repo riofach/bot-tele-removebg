@@ -144,27 +144,112 @@ PAS_FOTO_SIZES = {
 
 DPI = 300  # Standar resolusi cetak
 
+# Muat model deteksi wajah Haar Cascade dari OpenCV
+# Path ini akan bekerja jika opencv-python diinstal dengan benar
+try:
+    FACE_CASCADE = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    )
+except Exception as e:
+    print(f"Peringatan: Gagal memuat model deteksi wajah: {e}")
+    FACE_CASCADE = None
+
 
 def resize_pas_foto(image_bytes: bytes, size_key: str) -> bytes:
     """
-    Mengubah ukuran gambar ke standar pas foto yang dipilih.
+    Mengubah ukuran gambar ke standar pas foto yang dipilih dengan deteksi wajah.
+    Gambar akan di-crop secara cerdas untuk memastikan subjek berada di tengah
+    dan memiliki rasio aspek yang benar sebelum di-resize.
 
     :param image_bytes: Gambar input dalam bentuk bytes.
     :param size_key: Kunci ukuran dari PAS_FOTO_SIZES (misal: '3x4').
-    :return: Gambar yang sudah di-resize dalam format PNG bytes.
+    :return: Gambar yang sudah di-crop dan di-resize dalam format PNG bytes.
     """
     if size_key not in PAS_FOTO_SIZES:
         raise ValueError(f"Ukuran '{size_key}' tidak valid.")
 
-    img = Image.open(io.BytesIO(image_bytes))
-    target_cm = PAS_FOTO_SIZES[size_key]
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    img_np = np.array(img)
 
-    # Konversi cm ke pixel
+    target_cm = PAS_FOTO_SIZES[size_key]
     target_px_w = int((target_cm[0] / 2.54) * DPI)
     target_px_h = int((target_cm[1] / 2.54) * DPI)
+    target_aspect_ratio = target_px_w / target_px_h
 
-    # Resize dengan antialiasing terbaik
-    resized_img = img.resize((target_px_w, target_px_h), Image.Resampling.LANCZOS)
+    # --- Logika Cropping Cerdas ---
+    best_crop_box = None
+
+    if FACE_CASCADE:
+        # Konversi ke Grayscale untuk deteksi wajah
+        gray_img = cv2.cvtColor(img_np, cv2.COLOR_RGBA2GRAY)
+        faces = FACE_CASCADE.detectMultiScale(
+            gray_img, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80)
+        )
+
+        if len(faces) > 0:
+            # Ambil wajah terbesar
+            main_face = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)[0]
+            x, y, w, h = main_face
+            face_center_x = x + w // 2
+            face_center_y = y + h // 2
+
+            # Tentukan ukuran crop box, lebih besar dari wajah untuk menyertakan bahu
+            crop_h = h * 2.5
+            crop_w = crop_h * target_aspect_ratio
+
+            # Jika hasil crop lebih besar dari gambar asli, sesuaikan
+            if crop_w > img.width or crop_h > img.height:
+                if (img.width / target_aspect_ratio) < img.height:
+                    crop_w = img.width
+                    crop_h = crop_w / target_aspect_ratio
+                else:
+                    crop_h = img.height
+                    crop_w = crop_h * target_aspect_ratio
+
+            # Hitung pojok kiri atas crop box
+            crop_x1 = int(face_center_x - crop_w // 2)
+            crop_y1 = int(face_center_y - crop_h // 2 * 0.8)  # Geser sedikit ke atas
+
+            # Pastikan crop box tidak keluar dari gambar
+            crop_x1 = max(0, crop_x1)
+            crop_y1 = max(0, crop_y1)
+
+            crop_x2 = int(crop_x1 + crop_w)
+            crop_y2 = int(crop_y1 + crop_h)
+
+            if crop_x2 > img.width:
+                crop_x1 -= crop_x2 - img.width
+            if crop_y2 > img.height:
+                crop_y1 -= crop_y2 - img.height
+
+            best_crop_box = (
+                max(0, crop_x1),
+                max(0, crop_y1),
+                int(crop_x1 + crop_w),
+                int(crop_y1 + crop_h),
+            )
+
+    # Fallback atau jika tidak ada wajah terdeteksi: Center Crop
+    if not best_crop_box:
+        img_w, img_h = img.size
+        img_aspect_ratio = img_w / img_h
+
+        if img_aspect_ratio > target_aspect_ratio:  # Gambar lebih lebar
+            new_w = int(target_aspect_ratio * img_h)
+            offset = (img_w - new_w) // 2
+            best_crop_box = (offset, 0, offset + new_w, img_h)
+        else:  # Gambar lebih tinggi atau sama
+            new_h = int(img_w / target_aspect_ratio)
+            offset = (img_h - new_h) // 2
+            best_crop_box = (0, offset, img_w, offset + new_h)
+
+    # Lakukan cropping
+    cropped_img = img.crop(best_crop_box)
+
+    # Resize gambar yang sudah di-crop ke ukuran final
+    resized_img = cropped_img.resize(
+        (target_px_w, target_px_h), Image.Resampling.LANCZOS
+    )
 
     buffer = io.BytesIO()
     resized_img.save(buffer, format="PNG")

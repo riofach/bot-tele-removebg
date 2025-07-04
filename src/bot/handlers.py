@@ -39,12 +39,17 @@ RESTART_KEYBOARD = InlineKeyboardMarkup(
 
 
 async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kembali ke menu utama dengan menghapus pesan lama dan mengirim yang baru."""
+    """Kembali ke menu utama dengan mengirim pesan baru tanpa menghapus pesan lama."""
     query = update.callback_query
     await query.answer()
 
-    # Hapus pesan tempat tombol "Kembali" berada
-    await query.message.delete()
+    # Hapus tombol dari pesan sebelumnya agar tidak bisa diklik lagi
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception as e:
+        logger.warning(
+            f"Tidak dapat mengedit reply_markup: {e}. Mungkin pesan tidak memiliki tombol."
+        )
 
     user_name = update.effective_user.first_name
     keyboard = [
@@ -59,12 +64,15 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     # Kirim pesan menu utama yang baru
-    await query.message.reply_html(
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
         text=f"👋 Halo, {user_name}!\n\n"
         "Saya adalah bot yang bisa menghapus dan mengganti background gambar. "
-        "Pilih salah satu menu di bawah ini atau kirimkan saya foto secara langsung.",
+        "Silakan pilih salah satu menu di bawah ini.",
         reply_markup=reply_markup,
+        parse_mode="HTML",
     )
+    return ConversationHandler.END
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -207,11 +215,11 @@ async def bg_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Definisikan states untuk ConversationHandler
 (
     GET_PHOTO,
+    CONFIRM_BG_REMOVAL,
     CHOOSE_BG_OPTION,
     GET_BG_COLOR,
     ASK_SIZE,
     GET_SIZE,
-    GET_OUTPUT_FORMAT,
     GET_PDF_COUNT,
     GET_SIMPLE_PHOTO,
 ) = range(8)
@@ -240,46 +248,108 @@ async def pas_foto_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return GET_PHOTO
 
 
-async def pas_foto_get_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menerima dan memproses foto awal dari pengguna."""
-    message = update.message
-    processing_message = await message.reply_text("⏳ Menghapus background...")
+async def pas_foto_get_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Menerima foto dari user dan meminta konfirmasi untuk hapus background."""
+    photo_file = await update.message.photo[-1].get_file()
+
+    # Simpan file ID dan juga download byte-nya untuk penggunaan nanti
+    input_stream = io.BytesIO()
+    await photo_file.download_to_memory(input_stream)
+    input_stream.seek(0)
+    context.user_data["pas_foto_original_bytes"] = input_stream.read()
+
+    # Hapus pesan asli dari user
+    await update.message.delete()
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "✅ Ya, Hapus Background", callback_data="remove_bg_yes"
+            ),
+            InlineKeyboardButton("➡️ Tidak, Pakai Asli", callback_data="remove_bg_no"),
+        ],
+        [
+            InlineKeyboardButton(
+                "⬅️ Kembali ke Menu Utama", callback_data="back_to_start"
+            )
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Kirim kembali foto yang sama dengan pertanyaan
+    await context.bot.send_photo(
+        chat_id=update.effective_chat.id,
+        photo=photo_file.file_id,
+        caption="""Oke, foto diterima.
+
+Apakah Anda ingin menghapus background-nya? 
+(Ini diperlukan jika Anda ingin mengganti warna latar).""",
+        reply_markup=reply_markup,
+    )
+
+    return CONFIRM_BG_REMOVAL
+
+
+async def handle_remove_bg_decision_yes(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Memproses keputusan user untuk menghapus background, lalu lanjut ke pilihan warna."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_caption(
+        caption="⏳ Sedang memproses penghapusan background..."
+    )
 
     try:
-        photo = message.photo[-1]
-        photo_file = await photo.get_file()
-        input_bytes_io = io.BytesIO()
-        await photo_file.download_to_memory(input_bytes_io)
-        input_bytes_io.seek(0)
+        input_bytes = context.user_data["pas_foto_original_bytes"]
 
         # Hapus background
-        removed_bg_bytes = remove_background(input_bytes_io.read())
-        context.user_data["pas_foto_image"] = removed_bg_bytes
+        removed_bg_bytes = remove_background(input_bytes)
+        context.user_data["pas_foto_image"] = (
+            removed_bg_bytes  # Ini akan jadi basis untuk ganti warna
+        )
 
         keyboard = [
             [
                 InlineKeyboardButton("Ya, Ubah Background", callback_data="change_bg"),
-                InlineKeyboardButton("Lewati", callback_data="skip_bg"),
+                InlineKeyboardButton("Lewati (Transparan)", callback_data="skip_bg"),
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await message.reply_photo(
-            photo=io.BytesIO(removed_bg_bytes),
+        # Ganti media foto dengan versi tanpa background
+        media = InputMediaPhoto(
+            media=io.BytesIO(removed_bg_bytes),
             caption="Background berhasil dihapus! Apakah Anda ingin mengubah warna latarnya?",
-            reply_markup=reply_markup,
         )
-        await context.bot.delete_message(
-            chat_id=processing_message.chat_id, message_id=processing_message.message_id
-        )
+
+        await query.message.edit_media(media=media, reply_markup=reply_markup)
+
         return CHOOSE_BG_OPTION
 
     except Exception as e:
-        logger.error(f"Gagal di tahap GET_PHOTO: {e}")
-        await message.reply_text(
-            "Maaf, terjadi kesalahan saat memproses foto Anda. Silakan coba lagi."
+        logger.error(f"Gagal di tahap remove_bg_yes: {e}")
+        await query.message.edit_caption(
+            caption="Maaf, terjadi kesalahan saat memproses foto Anda. Silakan coba lagi.",
+            reply_markup=RESTART_KEYBOARD,
         )
         return ConversationHandler.END
+
+
+async def handle_remove_bg_decision_no(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Memproses keputusan user untuk tidak menghapus background dan langsung ke pilihan ukuran."""
+    query = update.callback_query
+    await query.answer()
+
+    # Gunakan gambar asli sebagai gambar final
+    original_bytes = context.user_data["pas_foto_original_bytes"]
+    context.user_data["pas_foto_image"] = original_bytes
+
+    # Langsung ke step ASK_SIZE (mirip dengan skip_bg)
+    return await pas_foto_ask_size(update, context)
 
 
 async def pas_foto_bg_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -365,7 +435,7 @@ async def pas_foto_ask_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     # Tentukan apakah akan edit pesan atau kirim baru
-    message_text = "Sekarang, silakan pilih ukuran pas foto yang Anda butuhkan:"
+    message_text = "Baik, menggunakan foto ini. Sekarang, silakan pilih ukuran pas foto yang Anda butuhkan:"
     if update.callback_query:
         # Gunakan edit_message_caption karena pesan yang diedit kemungkinan besar adalah foto
         await update.callback_query.message.edit_caption(
@@ -379,65 +449,35 @@ async def pas_foto_ask_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def pas_foto_get_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menangani pilihan ukuran dan meminta format output."""
+    """
+    Menangani pilihan ukuran, memproses resize, dan langsung meminta jumlah untuk PDF.
+    """
     query = update.callback_query
     await query.answer()
     size_key = query.data.split("_")[1]
     context.user_data["pas_foto_size"] = size_key
-
-    keyboard = [
-        [
-            InlineKeyboardButton("📥 Unduh 1 Foto", callback_data="output_single"),
-            InlineKeyboardButton("📄 Cetak Banyak di A4", callback_data="output_pdf"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    # Gunakan edit_message_caption karena pesan yang diedit adalah foto
-    await query.message.edit_caption(
-        caption=f"Ukuran {size_key} dipilih. Apa yang ingin Anda lakukan?",
-        reply_markup=reply_markup,
-    )
-    return GET_OUTPUT_FORMAT
-
-
-async def pas_foto_get_output_format(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-):
-    """Mengirim satu foto atau meminta jumlah untuk PDF."""
-    query = update.callback_query
-    await query.answer()
-    choice = query.data
-    size_key = context.user_data["pas_foto_size"]
     image_bytes = context.user_data["pas_foto_image"]
 
-    await query.message.edit_caption(caption="⏳ Siap, sedang memproses...")
+    await query.message.edit_caption(
+        caption=f"Ukuran {size_key} dipilih. ⏳ Memproses gambar..."
+    )
 
     try:
         resized_bytes = resize_pas_foto(image_bytes, size_key)
+        context.user_data["pas_foto_resized"] = resized_bytes
 
-        if choice == "output_single":
-            await query.message.reply_document(
-                document=io.BytesIO(resized_bytes),
-                filename=f"pas_foto_{size_key}.png",
-                caption="Ini dia pas foto Anda. Terima kasih!",
-                reply_markup=RESTART_KEYBOARD,
-            )
-            await context.bot.delete_message(
-                chat_id=query.message.chat_id, message_id=query.message.message_id
-            )
-            return ConversationHandler.END
-
-        elif choice == "output_pdf":
-            context.user_data["pas_foto_resized"] = resized_bytes
-            await query.message.reply_text(
-                "Oke. Mau dicetak berapa banyak foto dalam satu lembar A4? Silakan balas dengan angka (misal: 8)."
-            )
-            return GET_PDF_COUNT
+        # Langsung tanyakan jumlah PDF
+        await query.message.edit_caption(
+            caption=f"Ukuran {size_key} siap. Mau dicetak berapa banyak foto dalam satu lembar A4? Silakan balas dengan angka (misal: 8)."
+        )
+        return GET_PDF_COUNT
 
     except Exception as e:
-        logger.error(f"Gagal di tahap GET_OUTPUT_FORMAT: {e}")
-        await query.message.reply_text("Maaf, terjadi kesalahan. Proses dibatalkan.")
+        logger.error(f"Gagal di tahap GET_SIZE (resizing): {e}")
+        await query.message.edit_caption(
+            "Maaf, terjadi kesalahan saat memproses ukuran. Proses dibatalkan.",
+            reply_markup=RESTART_KEYBOARD,
+        )
         return ConversationHandler.END
 
 
