@@ -4,4 +4,11 @@ Pillow
 python-dotenv
 onnxruntime
 reportlab
-opencv-python 
+opencv-python
+
+# API Dependencies
+fastapi==0.68.2
+uvicorn==0.15.0
+python-multipart==0.0.6
+pydantic==1.8.2
+aiofiles==0.7.0
