@@ -1,16 +1,74 @@
 """
-Pydantic models untuk API request/response validation.
-Professional, reusable, dan type-safe models.
+Pydantic models for API request/response validation.
+Professional, type-safe, and reusable data models.
 """
 
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Union
+from typing import Optional, Union
 from enum import Enum
 import re
 
 
+# === SHARED VALIDATION UTILITIES ===
+class ColorValidator:
+    """
+    Centralized color validation utility to eliminate code duplication.
+    """
+
+    VALID_COLORS = [
+        "red",
+        "blue",
+        "green",
+        "white",
+        "black",
+        "yellow",
+        "orange",
+        "purple",
+        "pink",
+        "gray",
+        "grey",
+        "brown",
+    ]
+
+    @staticmethod
+    def validate_color(color_value) -> str:
+        """
+        Shared validation logic for background colors.
+
+        Args:
+            color_value: Color value to validate (str, enum, or None)
+
+        Returns:
+            Validated color string
+
+        Raises:
+            ValueError: If color is invalid
+        """
+        if color_value is None:
+            return None
+
+        # Handle enum types
+        if hasattr(color_value, "value"):
+            return color_value.value
+
+        # Handle string types
+        if isinstance(color_value, str):
+            # Check hex format
+            if color_value.startswith("#"):
+                if not re.match(r"^#[0-9A-Fa-f]{6}$", color_value):
+                    raise ValueError("Hex color harus dalam format #RRGGBB")
+                return color_value
+
+            # Check named colors
+            if color_value.lower() not in ColorValidator.VALID_COLORS:
+                raise ValueError("Invalid color. Use color name or hex code.")
+            return color_value.lower()
+
+        return color_value
+
+
 class BackgroundColor(str, Enum):
-    """Enum untuk pilihan warna background standar."""
+    """Standard background color options."""
 
     RED = "red"
     BLUE = "blue"
@@ -19,7 +77,7 @@ class BackgroundColor(str, Enum):
 
 
 class PasFotoSize(str, Enum):
-    """Enum untuk ukuran pas foto yang didukung."""
+    """Supported passport photo sizes."""
 
     SIZE_2X3 = "2x3"
     SIZE_3X4 = "3x4"
@@ -58,35 +116,8 @@ class RemoveBackgroundRequest(BaseModel):
 
     @validator("background_color")
     def validate_background_color(cls, v):
-        """Validasi format warna background."""
-        if v is None:
-            return v
-
-        # Check if it's a hex color
-        if v.startswith("#"):
-            if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
-                raise ValueError("Hex color harus dalam format #RRGGBB")
-            return v
-
-        # Check if it's a named color (basic validation)
-        valid_colors = [
-            "red",
-            "blue",
-            "green",
-            "white",
-            "black",
-            "yellow",
-            "orange",
-            "purple",
-            "pink",
-            "gray",
-            "grey",
-            "brown",
-        ]
-        if v.lower() not in valid_colors:
-            raise ValueError(f"Warna tidak valid. Gunakan nama warna atau hex code.")
-
-        return v.lower()
+        """Validasi format warna background menggunakan shared validator."""
+        return ColorValidator.validate_color(v)
 
 
 class RemoveBackgroundResponse(BaseResponse):
@@ -118,38 +149,8 @@ class PasFotoRequest(BaseModel):
 
     @validator("background_color")
     def validate_background_color(cls, v):
-        """Validasi background color untuk pas foto."""
-        if isinstance(v, BackgroundColor):
-            return v.value
-
-        if isinstance(v, str):
-            # Same validation as RemoveBackgroundRequest
-            if v.startswith("#"):
-                if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
-                    raise ValueError("Hex color harus dalam format #RRGGBB")
-                return v
-
-            valid_colors = [
-                "red",
-                "blue",
-                "green",
-                "white",
-                "black",
-                "yellow",
-                "orange",
-                "purple",
-                "pink",
-                "gray",
-                "grey",
-                "brown",
-            ]
-            if v.lower() not in valid_colors:
-                raise ValueError(
-                    f"Warna tidak valid. Gunakan nama warna atau hex code."
-                )
-            return v.lower()
-
-        return v
+        """Validasi background color menggunakan shared validator."""
+        return ColorValidator.validate_color(v)
 
 
 class PasFotoResponse(BaseResponse):

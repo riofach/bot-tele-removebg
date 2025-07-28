@@ -1,53 +1,93 @@
 """
-File untuk konfigurasi terpusat untuk Bot Telegram dan API.
+Centralized configuration for Bot Telegram and API.
+Professional configuration management with validation.
 """
 
 import os
 import json
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 
-# Muat variabel dari file .env
+# Load environment variables
 load_dotenv()
 
-# ===== TELEGRAM BOT CONFIGURATION =====
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-if not TELEGRAM_BOT_TOKEN:
-    raise ValueError(
-        "TELEGRAM_BOT_TOKEN tidak ditemukan! Mohon periksa file .env Anda."
-    )
+class ConfigurationError(Exception):
+    """Custom exception for configuration errors."""
+
+    pass
+
+
+def get_list_from_env(key: str, default: List[str]) -> List[str]:
+    """Parse list from environment variable with fallback."""
+    env_value = os.getenv(key)
+    if not env_value:
+        return default
+
+    try:
+        return json.loads(env_value)
+    except json.JSONDecodeError:
+        # Fallback: split by comma
+        return [item.strip() for item in env_value.split(",") if item.strip()]
+
+
+# ===== TELEGRAM BOT CONFIGURATION =====
+TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # ===== API CONFIGURATION =====
-API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "8000"))
-API_KEY = os.getenv("API_KEY")
+API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
+API_PORT: int = int(os.getenv("API_PORT", "8000"))
+API_KEY: Optional[str] = os.getenv("API_KEY")
 
 # Rate Limiting
-RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
+RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
 
-# File Upload Limits
-MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
-MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+# File Upload Configuration
+MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
+MAX_FILE_SIZE_BYTES: int = MAX_FILE_SIZE_MB * 1024 * 1024
 
-# Parse allowed file types from string to list
-ALLOWED_FILE_TYPES_STR = os.getenv(
-    "ALLOWED_FILE_TYPES", '["image/jpeg", "image/png", "image/jpg"]'
+ALLOWED_FILE_TYPES: List[str] = get_list_from_env(
+    "ALLOWED_FILE_TYPES", ["image/jpeg", "image/png", "image/jpg"]
 )
-try:
-    ALLOWED_FILE_TYPES: List[str] = json.loads(ALLOWED_FILE_TYPES_STR)
-except json.JSONDecodeError:
-    ALLOWED_FILE_TYPES = ["image/jpeg", "image/png", "image/jpg"]
 
-# Parse CORS origins from string to list
-CORS_ORIGINS_STR = os.getenv("CORS_ORIGINS", '["http://localhost:3000"]')
-try:
-    CORS_ORIGINS: List[str] = json.loads(CORS_ORIGINS_STR)
-except json.JSONDecodeError:
-    # Fallback: split by comma if JSON parsing fails
-    CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS_STR.split(",")]
+# CORS Configuration
+CORS_ORIGINS: List[str] = get_list_from_env("CORS_ORIGINS", ["http://localhost:3000"])
 
-# Validate API configuration if API_KEY is provided
+
+def validate_telegram_config() -> None:
+    """Validate Telegram bot configuration."""
+    if not TELEGRAM_BOT_TOKEN:
+        raise ConfigurationError(
+            "TELEGRAM_BOT_TOKEN not found! Please check your .env file."
+        )
+
+
+def validate_api_config() -> None:
+    """Validate API configuration."""
+    if not (1 <= API_PORT <= 65535):
+        raise ConfigurationError(f"Invalid API_PORT: {API_PORT}")
+
+    if MAX_FILE_SIZE_MB <= 0:
+        raise ConfigurationError(f"Invalid MAX_FILE_SIZE_MB: {MAX_FILE_SIZE_MB}")
+
+    if RATE_LIMIT_PER_MINUTE <= 0:
+        raise ConfigurationError(
+            f"Invalid RATE_LIMIT_PER_MINUTE: {RATE_LIMIT_PER_MINUTE}"
+        )
+
+
+# Validate configurations on import
+try:
+    validate_api_config()
+except ConfigurationError as e:
+    print(f"⚠️  API Configuration Warning: {e}")
+
+# Only validate Telegram config if token is expected
+if os.getenv("REQUIRE_TELEGRAM_TOKEN", "false").lower() == "true":
+    try:
+        validate_telegram_config()
+    except ConfigurationError as e:
+        print(f"⚠️  Telegram Configuration Warning: {e}")
 if API_KEY and len(API_KEY) < 32:
     raise ValueError(
         "API_KEY terlalu pendek! Gunakan minimal 32 karakter. "

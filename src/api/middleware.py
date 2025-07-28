@@ -1,11 +1,10 @@
 """
-Middleware untuk authentication, rate limiting, dan validasi.
-Professional implementation dengan clean code practices.
+API Middleware - Authentication, rate limiting, and validation.
+Professional implementation with clean code practices.
 """
 
 import time
-import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 from fastapi import HTTPException, status, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -14,15 +13,15 @@ import config
 
 class RateLimiter:
     """
-    Professional rate limiter dengan in-memory storage.
-    Thread-safe dan efficient untuk production use.
+    Professional rate limiter with in-memory storage.
+    Thread-safe and efficient for production use.
     """
 
     def __init__(self):
         self.request_counts: Dict[str, List[float]] = defaultdict(list)
         self.rate_limit = config.RATE_LIMIT_PER_MINUTE
 
-    def is_allowed(self, client_ip: str) -> tuple[bool, Optional[str]]:
+    def is_allowed(self, client_ip: str) -> Tuple[bool, Optional[str]]:
         """
         Check if request is allowed based on rate limit.
 
@@ -59,7 +58,7 @@ class RateLimiter:
 
 class APIKeyValidator:
     """
-    Professional API key validator dengan security best practices.
+    Professional API key validator with security best practices.
     """
 
     def __init__(self):
@@ -128,7 +127,7 @@ async def verify_api_key(
     ),
 ) -> Dict[str, str]:
     """
-    FastAPI dependency untuk API key verification.
+    FastAPI dependency for API key verification.
 
     Args:
         credentials: HTTP Bearer credentials
@@ -141,7 +140,7 @@ async def verify_api_key(
 
 async def rate_limit_check(request: Request) -> None:
     """
-    FastAPI dependency untuk rate limiting check.
+    FastAPI dependency for rate limiting check.
 
     Args:
         request: FastAPI Request object
@@ -184,8 +183,8 @@ class SecurityHeaders:
 
 async def add_process_time_header(request: Request, call_next):
     """
-    Middleware untuk menambahkan process time header.
-    Useful untuk monitoring dan debugging performance.
+    Middleware to add process time header.
+    Useful for monitoring and debugging performance.
     """
     start_time = time.time()
     response = await call_next(request)

@@ -1,6 +1,6 @@
 """
-Utility functions untuk API operations.
-Professional, reusable, dan well-documented utilities.
+Utility functions for API operations.
+Professional, reusable, and well-documented utilities.
 """
 
 import os
@@ -10,7 +10,7 @@ import aiofiles
 import tempfile
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from fastapi import UploadFile, HTTPException, status
 import config
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class FileValidator:
     """
-    Professional file validator dengan comprehensive checks.
+    Professional file validator with comprehensive checks.
     """
 
     @staticmethod
@@ -89,7 +89,7 @@ class FileValidator:
         return True
 
     @staticmethod
-    async def validate_upload_file(file: UploadFile) -> Dict[str, any]:
+    async def validate_upload_file(file: UploadFile) -> Dict[str, Any]:
         """
         Comprehensive file validation.
 
@@ -121,7 +121,7 @@ class FileValidator:
 
 class TempFileManager:
     """
-    Professional temporary file manager dengan automatic cleanup.
+    Professional temporary file manager with automatic cleanup.
     """
 
     def __init__(self):
@@ -131,11 +131,11 @@ class TempFileManager:
 
     def generate_unique_filename(self, original_filename: str, suffix: str = "") -> str:
         """
-        Generate unique filename dengan timestamp dan UUID.
+        Generate unique filename with timestamp and UUID.
 
         Args:
             original_filename: Original filename from upload
-            suffix: Optional suffix untuk filename
+            suffix: Optional suffix for filename
 
         Returns:
             Unique filename
@@ -162,7 +162,7 @@ class TempFileManager:
 
         Args:
             file: FastAPI UploadFile object
-            suffix: Optional suffix untuk filename
+            suffix: Optional suffix for filename
 
         Returns:
             Tuple of (file_path, file_info)
@@ -278,7 +278,7 @@ class TempFileManager:
 
 class ResponseBuilder:
     """
-    Professional response builder untuk consistent API responses.
+    Professional response builder for consistent API responses.
     """
 
     @staticmethod
